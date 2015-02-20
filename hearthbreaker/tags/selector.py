@@ -1,11 +1,12 @@
 import abc
-from hearthbreaker.tags.base import Selector, Player, Picker
+from hearthbreaker.constants import MINION_TYPE
+from hearthbreaker.tags.base import Selector, Player, Picker, Function, Amount
 import hearthbreaker.tags.condition
 
 
 class FriendlyPlayer(Player):
     def match(self, source, obj):
-        return source.player is obj.player
+        return obj.player is source.player
 
     def get_players(self, target):
         return [target]
@@ -19,7 +20,7 @@ class EnemyPlayer(Player):
         return [target.opponent]
 
     def match(self, source, obj):
-        return source.player is obj.player.opponent
+        return obj.player is source.player.opponent
 
     def __to_json__(self):
         return "enemy"
@@ -38,7 +39,7 @@ class BothPlayer(Player):
 
 class PlayerOne(Player):
     def match(self, source, obj):
-        return source.player is obj.player.game.players[0]
+        return obj.player is source.player.game.players[0]
 
     def get_players(self, target):
         return [target.game.players[0]]
@@ -49,7 +50,7 @@ class PlayerOne(Player):
 
 class PlayerTwo(Player):
     def match(self, source, obj):
-        return source.player is obj.player.game.players[1]
+        return obj.player is source.player.game.players[1]
 
     def get_players(self, target):
         return [target.game.players[1]]
@@ -60,7 +61,7 @@ class PlayerTwo(Player):
 
 class CurrentPlayer(Player):
     def match(self, source, obj):
-        return source.player is obj.player.game.current_player
+        return obj.player is source.player.game.current_player
 
     def get_players(self, target):
         return [target.game.current_player]
@@ -71,7 +72,7 @@ class CurrentPlayer(Player):
 
 class OtherPlayer(Player):
     def match(self, source, obj):
-        return source.player is obj.player.game.other_player
+        return obj.player is source.player.game.other_player
 
     def get_players(self, target):
         return [target.game.other_player]
@@ -124,25 +125,18 @@ class CardSelector(Selector, metaclass=abc.ABCMeta):
     def __init__(self, players=FriendlyPlayer()):
         self.players = players
 
-    def track_cards(self, player):
-        pass
-
-    def untrack_cards(self, player):
-        pass
-
     def get_targets(self, source, obj=None):
         players = self.players.get_players(source.player)
         targets = []
         for p in players:
-            for card in p.cards:
+            for card in p.hand:
                 if self.match(source, card):
                     targets.append(card)
 
         return targets
 
-    @abc.abstractmethod
     def match(self, source, obj):
-        pass
+        return obj.is_card() and self.players.match(source, obj)
 
     def __to_json__(self):
         return {
@@ -155,48 +149,9 @@ class CardSelector(Selector, metaclass=abc.ABCMeta):
         return self
 
 
-class SpecificCardSelector(CardSelector):
-    def __init__(self, card, players=FriendlyPlayer()):
-        super().__init__(players)
-        self.card_index = -1
-        self.__card = card
-
-    def match(self, source, obj):
-        return obj is self.__card
-
-    def track_cards(self, player):
-        if self.card_index == -1:
-            try:
-                self.card_index = player.hand.index(self.__card)
-            except ValueError:
-                return
-        else:
-            self.__card = player.hand[self.card_index]
-
-        def card_played(card, index):
-            if index < self.card_index:
-                self.card_index -= 1
-
-            if index == self.card_index:
-                player.unbind("card_played", card_played)
-
-        player.bind("card_played", card_played)
-
-    def __to_json__(self):
-        return {
-            'name': 'specific_card',
-            'card_index': self.card_index
-        }
-
-    def __from_json__(self, card_index, players='friendly'):
-        self.card_index = card_index
-        self.__card = None
-        return self
-
-
 class SecretSelector(CardSelector):
     def match(self, source, obj):
-        return obj.is_secret()
+        return super().match(source, obj) and obj.is_secret()
 
     def __to_json__(self):
         return {
@@ -211,7 +166,7 @@ class SecretSelector(CardSelector):
 
 class SpellSelector(CardSelector):
     def match(self, source, obj):
-        return obj.is_spell()
+        return super().match(source, obj) and obj.is_spell()
 
     def __to_json__(self):
         return {
@@ -226,8 +181,7 @@ class SpellSelector(CardSelector):
 
 class BattlecrySelector(CardSelector):
     def match(self, source, obj):
-        return obj.is_minion() and obj.is_card() and \
-            obj.battlecry is not None
+        return super().match(source, obj) and obj.is_minion() and obj.is_card() and obj.battlecry is not ()
 
     def __to_json__(self):
         return {
@@ -242,7 +196,7 @@ class BattlecrySelector(CardSelector):
 
 class MinionCardSelector(CardSelector):
     def match(self, source, obj):
-        return obj.is_minion()
+        return super().match(source, obj) and obj.is_minion()
 
     def __to_json__(self):
         return {
@@ -255,24 +209,46 @@ class MinionCardSelector(CardSelector):
         return self
 
 
-class HeroSelector(Selector):
-    def __init__(self, players=FriendlyPlayer()):
-        self.players = players
-
-    def get_targets(self, source, obj=None):
-        return [p.hero for p in self.players.get_players(source.player)]
-
+class MechCardSelector(MinionCardSelector):
     def match(self, source, obj):
-        return source.player is obj
+        return super().match(source, obj) and obj.minion_type == MINION_TYPE.MECH
 
     def __to_json__(self):
         return {
-            'name': 'hero',
+            'name': 'mech_card',
             'players': self.players
         }
 
     def __from_json__(self, players='friendly'):
         self.players = Player.from_json(players)
+        return self
+
+
+class HeroSelector(Selector):
+    def __init__(self, players=FriendlyPlayer(), picker=AllPicker()):
+        self.players = players
+        self.picker = picker
+
+    def get_targets(self, source, obj=None):
+        return [p.hero for p in self.players.get_players(source.player)]
+
+    def choose_targets(self, source, target=None):
+        possible_targets = self.get_targets(source, target)
+        return self.picker.pick(possible_targets, source.player)
+
+    def match(self, source, obj):
+        return obj.is_hero() and self.players.match(source, obj)
+
+    def __to_json__(self):
+        return {
+            'name': 'hero',
+            'players': self.players,
+            'picker': self.picker
+        }
+
+    def __from_json__(self, picker, players='friendly'):
+        self.players = Player.from_json(players)
+        self.picker = Picker.from_json(**picker)
         return self
 
 
@@ -312,11 +288,15 @@ class MinionSelector(Selector):
                 if self.match(source, minion):
                     targets.append(minion)
 
-        return self.picker.pick(targets, source.player)
+        return targets
+
+    def choose_targets(self, source, target=None):
+        possible_targets = self.get_targets(source, target)
+        return self.picker.pick(possible_targets, source.player)
 
     def match(self, source, obj):
         if self.condition:
-            return obj.is_minion() and self.players.match(source, obj)\
+            return not obj.is_card() and obj.is_minion() and self.players.match(source, obj)\
                 and self.condition.evaluate(source, obj)
         else:
             return obj.is_minion() and self.players.match(source, obj)
@@ -363,7 +343,11 @@ class CharacterSelector(Selector):
             if self.match(source, p.hero):
                 targets.append(p.hero)
 
-        return self.picker.pick(targets, source.player)
+        return targets
+
+    def choose_targets(self, source, target=None):
+        possible_targets = self.get_targets(source, target)
+        return self.picker.pick(possible_targets, source.player)
 
     def match(self, source, obj):
         if self.condition:
@@ -409,6 +393,29 @@ class SelfSelector(Selector):
         }
 
 
+class ConstantSelector(Selector):
+    def __init__(self, targets):
+        self.targets = targets
+
+    def match(self, source, obj):
+        return obj.is_character() and obj.born in self.targets
+
+    def get_targets(self, source, target=None):
+        result = []
+        for t in self.targets:
+            for player in target.game.players:
+                for minion in player.minions:
+                    if minion.born == t:
+                        result.append(minion)
+        return result
+
+    def __to_json__(self):
+        return {
+            'name': 'constant',
+            'targets': self.targets
+        }
+
+
 class TargetSelector(Selector):
 
     def __init__(self, condition=None):
@@ -446,10 +453,10 @@ class WeaponSelector(Selector):
         self.players = players
 
     def get_targets(self, source, obj=None):
-        return [p.hero for p in self.players.get_players(source.player)]
+        return [p.hero.weapon for p in self.players.get_players(source.player) if p.hero.weapon]
 
     def match(self, source, obj):
-        return source.player is obj
+        return obj.is_weapon() and self.players.match(source, obj)
 
     def __to_json__(self):
         return {
@@ -459,4 +466,72 @@ class WeaponSelector(Selector):
 
     def __from_json__(self, players='friendly'):
         self.players = Player.from_json(players)
+        return self
+
+
+class Count(Function):
+    def __init__(self, selector):
+        self.selector = selector
+
+    def do(self, target):
+        return len(self.selector.get_targets(target))
+
+    def __to_json__(self):
+        return {
+            'name': 'count',
+            'selector': self.selector
+        }
+
+    def __from_json__(self, selector):
+        self.selector = Selector.from_json(**selector)
+        return self
+
+
+class Attribute(Function):
+    def __init__(self, attribute, selector):
+        self.attribute = attribute
+        self.selector = selector
+
+    def do(self, target):
+        targets = self.selector.get_targets(target)
+        total = 0
+        for t in targets:
+            if self.attribute == "damage":
+                total += t.calculate_max_health() - t.health
+            elif self.attribute == 'mana':
+                total += t.card.mana
+            elif self.attribute == "attack":
+                total += t.calculate_attack()
+            else:
+                total += getattr(t, self.attribute)
+        return total
+
+    def __to_json__(self):
+        return {
+            'name': 'attribute',
+            'attribute': self.attribute,
+            'selector': self.selector
+        }
+
+    def __from_json__(self, attribute, selector):
+        self.attribute = attribute
+        self.selector = Selector.from_json(**selector)
+        return self
+
+
+class Difference(Function, metaclass=Amount):
+    def __init__(self, value):
+        self.value = value
+
+    def do(self, target):
+        return max(0, self.value - self.get_amount(target, target))
+
+    def __to_json__(self):
+        return {
+            'name': 'difference',
+            'value': self.value,
+        }
+
+    def __from_json__(self, value):
+        self.value = value
         return self

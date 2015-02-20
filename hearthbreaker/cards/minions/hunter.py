@@ -1,11 +1,12 @@
+from hearthbreaker.cards.base import MinionCard
 from hearthbreaker.constants import CHARACTER_CLASS, CARD_RARITY, MINION_TYPE
+from hearthbreaker.game_objects import Minion
 from hearthbreaker.tags.action import Draw, Summon, AddCard, Give
 from hearthbreaker.tags.base import Effect, Aura, Deathrattle, CardQuery, Battlecry, Buff
 from hearthbreaker.tags.condition import IsType
-from hearthbreaker.tags.event import MinionPlaced, MinionDied
-from hearthbreaker.tags.selector import MinionSelector, SelfSelector, PlayerSelector, UserPicker
-from hearthbreaker.game_objects import MinionCard, Minion
-from hearthbreaker.tags.status import ChangeAttack, ChangeHealth, Charge, Taunt
+from hearthbreaker.tags.event import MinionPlaced, MinionDied, Damaged
+from hearthbreaker.tags.selector import MinionSelector, SelfSelector, PlayerSelector, UserPicker, Count
+from hearthbreaker.tags.status import ChangeAttack, ChangeHealth, Charge, Taunt, DoubleAttack
 
 
 class TimberWolf(MinionCard):
@@ -125,3 +126,30 @@ class Snake(MinionCard):
 
     def create_minion(self, player):
         return Minion(1, 1)
+
+
+class MetaltoothLeaper(MinionCard):
+    def __init__(self):
+        super().__init__("Metaltooth Leaper", 3, CHARACTER_CLASS.HUNTER, CARD_RARITY.RARE, MINION_TYPE.MECH,
+                         battlecry=Battlecry(Give(Buff(ChangeAttack(2))), MinionSelector(IsType(MINION_TYPE.MECH))))
+
+    def create_minion(self, player):
+        return Minion(3, 3)
+
+
+class KingOfBeasts(MinionCard):
+    def __init__(self):
+        super().__init__("King of Beasts", 5, CHARACTER_CLASS.HUNTER, CARD_RARITY.RARE, MINION_TYPE.BEAST,
+                         battlecry=Battlecry(Give(Buff(ChangeAttack(Count(MinionSelector(IsType(
+                             MINION_TYPE.BEAST)))))), SelfSelector()))
+
+    def create_minion(self, player):
+        return Minion(2, 6, taunt=True)
+
+
+class Gahzrilla(MinionCard):
+    def __init__(self):
+        super().__init__("Gahz'rilla", 7, CHARACTER_CLASS.HUNTER, CARD_RARITY.LEGENDARY, MINION_TYPE.BEAST)
+
+    def create_minion(self, player):
+        return Minion(6, 9, effects=[Effect(Damaged(), Give(Buff(DoubleAttack())), SelfSelector())])

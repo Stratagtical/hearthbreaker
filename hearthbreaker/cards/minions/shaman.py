@@ -1,11 +1,13 @@
-from hearthbreaker.tags.action import Draw, Damage, Give, Heal
-from hearthbreaker.tags.base import Aura, Effect, Battlecry
-from hearthbreaker.tags.condition import Adjacent, HasOverload
-from hearthbreaker.tags.event import TurnEnded, CardPlayed
-from hearthbreaker.tags.selector import MinionSelector, PlayerSelector, CharacterSelector, BothPlayer, \
-    UserPicker, SelfSelector
+from hearthbreaker.cards.base import MinionCard
+from hearthbreaker.game_objects import Minion
+from hearthbreaker.tags.action import Draw, Damage, Give, Heal, ChangeTarget, AddCard
+from hearthbreaker.tags.base import Aura, Effect, Battlecry, CardQuery, CARD_SOURCE
+from hearthbreaker.tags.condition import Adjacent, HasOverload, IsType, OneIn, NotCurrentTarget, \
+    OpponentMinionCountIsGreaterThan, And
+from hearthbreaker.tags.event import TurnEnded, CardPlayed, MinionDied, Attack
+from hearthbreaker.tags.selector import MinionSelector, PlayerSelector, HeroSelector, CharacterSelector, BothPlayer, \
+    UserPicker, SelfSelector, RandomPicker, EnemyPlayer
 from hearthbreaker.constants import CHARACTER_CLASS, CARD_RARITY, MINION_TYPE
-from hearthbreaker.game_objects import MinionCard, Minion
 from hearthbreaker.tags.status import ChangeAttack, ChangeHealth, Windfury
 
 
@@ -114,3 +116,57 @@ class SpiritWolf(MinionCard):
 
     def create_minion(self, p):
         return Minion(2, 3, taunt=True)
+
+
+class VitalityTotem(MinionCard):
+    def __init__(self):
+        super().__init__("Vitality Totem", 2, CHARACTER_CLASS.SHAMAN, CARD_RARITY.RARE, MINION_TYPE.TOTEM)
+
+    def create_minion(self, player):
+        return Minion(0, 3, effects=[Effect(TurnEnded(), Heal(4), HeroSelector())])
+
+
+class SiltfinSpiritwalker(MinionCard):
+    def __init__(self):
+        super().__init__("Siltfin Spiritwalker", 4, CHARACTER_CLASS.SHAMAN, CARD_RARITY.EPIC, MINION_TYPE.MURLOC,
+                         overload=1)
+
+    def create_minion(self, player):
+        return Minion(2, 5, effects=[Effect(MinionDied(IsType(MINION_TYPE.MURLOC)), Draw(), PlayerSelector())])
+
+
+class WhirlingZapomatic(MinionCard):
+    def __init__(self):
+        super().__init__("Whirling Zap-o-matic", 2, CHARACTER_CLASS.SHAMAN, CARD_RARITY.COMMON, MINION_TYPE.MECH)
+
+    def create_minion(self, p):
+        return Minion(3, 2, windfury=True)
+
+
+class DunemaulShaman(MinionCard):
+    def __init__(self):
+        super().__init__("Dunemaul Shaman", 4, CHARACTER_CLASS.SHAMAN, CARD_RARITY.RARE, overload=1)
+
+    def create_minion(self, player):
+        return Minion(5, 4, windfury=True, effects=[Effect(Attack(),
+                                                           ChangeTarget(CharacterSelector(NotCurrentTarget(),
+                                                                                          EnemyPlayer(),
+                                                                                          RandomPicker())),
+                                                           SelfSelector(),
+                                                           And(OneIn(2), OpponentMinionCountIsGreaterThan(0)))])
+
+
+class Neptulon(MinionCard):
+    def __init__(self):
+        from hearthbreaker.cards.minions.neutral import BluegillWarrior, ColdlightOracle, ColdlightSeer, \
+            GrimscaleOracle, MurlocRaider, MurlocTidecaller, MurlocTidehunter, MurlocWarleader, OldMurkEye, \
+            Puddlestomper
+        murloc_list = [BluegillWarrior(), ColdlightOracle(), ColdlightSeer(), GrimscaleOracle(), MurlocRaider(),
+                       MurlocTidecaller(), MurlocTidehunter(), MurlocWarleader(), OldMurkEye(), Puddlestomper(),
+                       SiltfinSpiritwalker()]
+        super().__init__("Neptulon", 7, CHARACTER_CLASS.SHAMAN, CARD_RARITY.LEGENDARY, overload=3,
+                         battlecry=Battlecry(AddCard(CardQuery(source=CARD_SOURCE.LIST, source_list=murloc_list), 4),
+                                             PlayerSelector()))
+
+    def create_minion(self, player):
+        return Minion(7, 7)

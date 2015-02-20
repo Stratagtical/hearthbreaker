@@ -3,7 +3,7 @@ import unittest
 
 from hearthbreaker.agents.basic_agents import PredictableAgent, DoNothingAgent
 from tests.agents.testing_agents import OneCardPlayingAgent, EnemySpellTestingAgent, \
-    CardTestingAgent, EnemyMinionSpellTestingAgent, PlayAndAttackAgent
+    CardTestingAgent, EnemyMinionSpellTestingAgent, PlayAndAttackAgent, HeroPowerAndCardPlayingAgent
 from hearthbreaker.constants import MINION_TYPE
 from tests.testing_utils import generate_game_for
 from hearthbreaker.cards import *
@@ -316,6 +316,30 @@ class TestWarlock(unittest.TestCase):
         self.assertEqual("Worthless Imp", game.players[0].minions[0].card.name)
         self.assertEqual("Worthless Imp", game.players[0].minions[1].card.name)
 
+    def test_SenseDemonsOverflow(self):
+        game = generate_game_for([SenseDemons, SenseDemons, SenseDemons, FlameImp, FlameImp], Wisp,
+                                 OneCardPlayingAgent, DoNothingAgent)
+        for turn in range(0, 4):
+            game.play_single_turn()
+        self.assertEqual(5, len(game.players[0].hand))
+
+        # Sense Demons to draw 2 Flame Imps
+        game.play_single_turn()
+
+        self.assertEqual(7, len(game.players[0].hand))
+
+        # Sense Demons to draw 2 more Flame Imps
+        game.play_single_turn()
+        game.play_single_turn()
+
+        self.assertEqual(9, len(game.players[0].hand))
+
+        # Sense Demons to draw 2 more Flame Imps, but 1 gets destroyed
+        game.play_single_turn()
+        game.play_single_turn()
+
+        self.assertEqual(10, len(game.players[0].hand))
+
     def test_BaneOfDoom(self):
         game = generate_game_for(BaneOfDoom, StonetuskBoar, EnemyMinionSpellTestingAgent, DoNothingAgent)
         imp = FlameImp()
@@ -411,6 +435,15 @@ class TestWarlock(unittest.TestCase):
         self.assertEqual(1, len(game.players[0].minions))
         self.assertEqual('Wisp', game.players[0].hand[0].name)
         self.assertEqual(0, game.players[0].hand[0].mana_cost(game.players[0]))
+
+    def test_SummoningPortal_Mechwarper(self):
+        game = generate_game_for([SummoningPortal, Mechwarper, SpiderTank], StonetuskBoar,
+                                 OneCardPlayingAgent, DoNothingAgent)
+        for turn in range(9):
+            game.play_single_turn()
+
+        self.assertEqual(2, len(game.current_player.minions))
+        self.assertEqual(0, game.current_player.hand[0].mana_cost(game.current_player))
 
     def test_BloodImp(self):
         game = generate_game_for(BloodImp, StonetuskBoar, OneCardPlayingAgent, DoNothingAgent)
@@ -608,3 +641,113 @@ class TestWarlock(unittest.TestCase):
         game.play_single_turn()
         # Demonheart to kill own Raptor
         self.assertEqual(0, len(game.players[0].minions))
+
+    def test_FelCannon(self):
+        game = generate_game_for([FelCannon, BoulderfistOgre], [BloodfenRaptor, HarvestGolem, Deathwing],
+                                 OneCardPlayingAgent, OneCardPlayingAgent)
+
+        for turn in range(6):
+            game.play_single_turn()
+
+        self.assertEqual(2, len(game.current_player.minions))
+
+        # Fel Cannon should target the Bloodfen Raptor
+        game.play_single_turn()
+
+        self.assertEqual(1, len(game.other_player.minions))
+        self.assertEqual("Harvest Golem", game.other_player.minions[0].card.name)
+        self.assertEqual(1, len(game.current_player.minions))
+        self.assertEqual(5, game.current_player.minions[0].health)
+
+        game.play_single_turn()
+        game.play_single_turn()
+
+        # Fel Cannon should target nothing
+        self.assertEqual(1, len(game.other_player.minions))
+        self.assertEqual("Harvest Golem", game.other_player.minions[0].card.name)
+        self.assertEqual(1, len(game.current_player.minions))
+        self.assertEqual(5, game.current_player.minions[0].health)
+
+        game.play_single_turn()
+        game.play_single_turn()
+
+        # Fel Cannon should target ogre
+
+        self.assertEqual(1, len(game.other_player.minions))
+        self.assertEqual("Harvest Golem", game.other_player.minions[0].card.name)
+        self.assertEqual(2, len(game.current_player.minions))
+        self.assertEqual(5, game.current_player.minions[0].health)
+        self.assertEqual(5, game.current_player.minions[1].health)
+
+    def test_ImpLosion(self):
+        game = generate_game_for([Implosion, OgreMagi], [SpiderTank, Whirlwind],
+                                 OneCardPlayingAgent, OneCardPlayingAgent)
+        for turn in range(0, 7):
+            game.play_single_turn()
+
+        # Rolls 4, killing Spider
+        self.assertEqual(4, len(game.players[0].minions))
+        self.assertEqual(0, len(game.players[1].minions))
+
+        # Whirlwind clears, Ogre, Spider, Implosion
+        game.play_single_turn()
+        game.play_single_turn()
+        game.play_single_turn()
+        game.play_single_turn()
+
+        # Rolls 3 + 1 spell damage, killing Spider
+        self.assertEqual(5, len(game.players[0].minions))
+        self.assertEqual(0, len(game.players[1].minions))
+
+        # Whirlwind clears except Ogre, Ogre, Spider, Implosion
+        game.play_single_turn()
+        game.play_single_turn()
+        game.play_single_turn()
+        game.play_single_turn()
+
+        # Rolls 2 + 2 spell damage, rip Spider
+        self.assertEqual(6, len(game.players[0].minions))
+        self.assertEqual(0, len(game.players[1].minions))
+
+    def test_MalGanis(self):
+        game = generate_game_for([FlameImp, MalGanis], FlameImp, OneCardPlayingAgent, OneCardPlayingAgent)
+
+        for turn in range(17):
+            game.play_single_turn()
+
+        self.assertEqual(2, len(game.current_player.minions))
+        self.assertTrue(game.current_player.hero.immune)
+        self.assertFalse(game.other_player.hero.immune)
+        self.assertEqual(5, game.current_player.minions[1].calculate_attack())
+        self.assertEqual(4, game.current_player.minions[1].calculate_max_health())
+        self.assertEqual(9, game.current_player.minions[0].calculate_attack())
+        self.assertEqual(7, game.current_player.minions[0].calculate_max_health())
+
+        for minion in game.other_player.minions:
+            self.assertEqual(3, minion.calculate_attack())
+            self.assertEqual(2, minion.calculate_max_health())
+
+    def test_FloatingWatcher(self):
+        game = generate_game_for(FloatingWatcher, Hellfire, HeroPowerAndCardPlayingAgent, OneCardPlayingAgent)
+
+        for turn in range(13):
+            game.play_single_turn()
+
+        self.assertEqual(1, len(game.current_player.minions))
+        self.assertEqual(9, game.current_player.hero.health)
+        self.assertEqual(4, game.current_player.minions[0].calculate_attack())
+        self.assertEqual(4, game.current_player.minions[0].calculate_max_health())
+
+        game.play_single_turn()
+        self.assertEqual(1, len(game.other_player.minions))
+        self.assertEqual(6, game.other_player.hero.health)
+        self.assertEqual(4, game.other_player.minions[0].calculate_attack())
+        self.assertEqual(4, game.other_player.minions[0].calculate_max_health())
+
+        game.play_single_turn()
+        self.assertEqual(2, len(game.current_player.minions))
+        self.assertEqual(4, game.current_player.hero.health)
+        self.assertEqual(4, game.current_player.minions[0].calculate_attack())
+        self.assertEqual(4, game.current_player.minions[0].calculate_max_health())
+        self.assertEqual(6, game.current_player.minions[1].calculate_attack())
+        self.assertEqual(6, game.current_player.minions[1].calculate_max_health())

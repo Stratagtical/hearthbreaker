@@ -3,8 +3,8 @@ import unittest
 
 from hearthbreaker.agents.basic_agents import PredictableAgent, DoNothingAgent
 from tests.agents.testing_agents import CardTestingAgent
-from hearthbreaker.cards import HuntersMark, MogushanWarden, AvengingWrath, CircleOfHealing, AlAkirTheWindlord, Shadowform, \
-    DefiasRingleader, Doomguard, ArcaneIntellect, Swipe, ArathiWeaponsmith, MassDispel
+from hearthbreaker.cards import HuntersMark, MogushanWarden, AvengingWrath, CircleOfHealing, AlAkirTheWindlord, \
+    Shadowform, DefiasRingleader, Doomguard, ArcaneIntellect, Swipe, ArathiWeaponsmith, MassDispel
 from hearthbreaker.powers import MindSpike, MindShatter
 from tests.testing_utils import generate_game_for
 
@@ -62,7 +62,8 @@ class TestPowers(unittest.TestCase):
     def test_MindSpike(self):
         game = generate_game_for(Shadowform, MogushanWarden, PredictableAgent, DoNothingAgent)
 
-        game.players[0].hero.power = MindSpike(game.players[0].hero)
+        game.players[0].hero.power = MindSpike()
+        game.players[0].hero.power.hero = game.players[0].hero
 
         for turn in range(0, 3):
             game.play_single_turn()
@@ -72,7 +73,8 @@ class TestPowers(unittest.TestCase):
     def test_MindShatter(self):
         game = generate_game_for(Shadowform, Shadowform, PredictableAgent, DoNothingAgent)
 
-        game.players[0].hero.power = MindShatter(game.players[0].hero)
+        game.players[0].hero.power = MindShatter()
+        game.players[0].hero.power.hero = game.players[0].hero
 
         for turn in range(0, 3):
             game.play_single_turn()

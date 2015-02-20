@@ -1,10 +1,12 @@
-from hearthbreaker.tags.action import Equip, Give, Heal
-from hearthbreaker.tags.base import Deathrattle, Battlecry, Effect
-from hearthbreaker.tags.selector import PlayerSelector, MinionSelector, SelfSelector, EnemyPlayer, HeroSelector
+from hearthbreaker.cards.base import MinionCard, WeaponCard
+from hearthbreaker.game_objects import Weapon, Minion
+from hearthbreaker.tags.action import Equip, Give, Heal, Damage
+from hearthbreaker.tags.base import Deathrattle, Battlecry, Effect, Buff
+from hearthbreaker.tags.selector import PlayerSelector, MinionSelector, SelfSelector, EnemyPlayer, HeroSelector, \
+    BothPlayer
 from hearthbreaker.constants import CHARACTER_CLASS, CARD_RARITY, MINION_TYPE
-from hearthbreaker.game_objects import MinionCard, Minion, WeaponCard, Weapon
-from hearthbreaker.tags.status import SetAttack, DivineShield
-from hearthbreaker.tags.condition import IsType
+from hearthbreaker.tags.status import SetAttack, DivineShield, ChangeHealth, ChangeAttack
+from hearthbreaker.tags.condition import IsType, HasCardName, MinionHasDeathrattle
 from hearthbreaker.tags.event import MinionSummoned
 
 
@@ -60,3 +62,39 @@ class CobaltGuardian(MinionCard):
     def create_minion(self, player):
         return Minion(6, 3, effects=[Effect(MinionSummoned(IsType(MINION_TYPE.MECH)), Give(DivineShield()),
                                             SelfSelector())])
+
+
+class SilverHandRecruit(MinionCard):
+    def __init__(self):
+        super().__init__("Silver Hand Recruit", 1, CHARACTER_CLASS.PALADIN, CARD_RARITY.SPECIAL)
+
+    def create_minion(self, player):
+        return Minion(1, 1)
+
+
+class ShieldedMinibot(MinionCard):
+    def __init__(self):
+        super().__init__("Shielded Minibot", 2, CHARACTER_CLASS.PALADIN, CARD_RARITY.COMMON,
+                         minion_type=MINION_TYPE.MECH)
+
+    def create_minion(self, player):
+        return Minion(2, 2, divine_shield=True)
+
+
+class Quartermaster(MinionCard):
+    def __init__(self):
+        super().__init__("Quartermaster", 5, CHARACTER_CLASS.PALADIN, CARD_RARITY.EPIC,
+                         battlecry=Battlecry(Give([Buff(ChangeAttack(2)), Buff(ChangeHealth(2))]),
+                                             MinionSelector(HasCardName("Silver Hand Recruit"))))
+
+    def create_minion(self, player):
+        return Minion(2, 5)
+
+
+class ScarletPurifier(MinionCard):
+    def __init__(self):
+        super().__init__("Scarlet Purifier", 3, CHARACTER_CLASS.PALADIN, CARD_RARITY.RARE,
+                         battlecry=Battlecry(Damage(2), MinionSelector(MinionHasDeathrattle(), BothPlayer())))
+
+    def create_minion(self, player):
+        return Minion(4, 3)

@@ -1,7 +1,9 @@
 import random
 import unittest
+from hearthbreaker.constants import MINION_TYPE
 
-from tests.agents.testing_agents import PlayAndAttackAgent, OneCardPlayingAgent, CardTestingAgent
+from tests.agents.testing_agents import PlayAndAttackAgent, OneCardPlayingAgent, CardTestingAgent, \
+    HeroPowerAndCardPlayingAgent
 from tests.testing_utils import generate_game_for
 from hearthbreaker.cards import *
 from hearthbreaker.agents.basic_agents import PredictableAgent, DoNothingAgent
@@ -501,18 +503,18 @@ class TestRogue(unittest.TestCase):
 
         self.assertEqual(2, game.players[0].hero.weapon.base_attack)
         self.assertEqual(2, game.players[0].hero.weapon.durability)
-        self.assertEqual(29, game.players[1].hero.health)
+        self.assertEqual(29, game.players[0].hero.health)
 
         for turn in range(0, 5):
             game.play_single_turn()
 
-        self.assertEqual(27, game.players[1].hero.health)
+        self.assertEqual(27, game.players[0].hero.health)
 
         # Test Combo (1 + 2 = 3 damage)
         game.play_single_turn()
         self.assertEqual(2, game.players[0].hero.weapon.base_attack)
         self.assertEqual(2, game.players[0].hero.weapon.durability)
-        self.assertEqual(24, game.players[1].hero.health)
+        self.assertEqual(24, game.players[0].hero.health)
 
     def test_AnubarAmbusher(self):
         game = generate_game_for(AnubarAmbusher, SiphonSoul, OneCardPlayingAgent, CardTestingAgent)
@@ -569,3 +571,149 @@ class TestRogue(unittest.TestCase):
         game.check_delayed()
         self.assertEqual(6, len(game.current_player.minions))
         self.assertEqual(7, len(game.other_player.minions))
+
+    def test_OneEyedCheat(self):
+        game = generate_game_for([BloodsailCorsair, OneeyedCheat, SouthseaCaptain], BloodsailRaider,
+                                 OneCardPlayingAgent, OneCardPlayingAgent)
+
+        game.play_single_turn()
+
+        self.assertEqual(1, len(game.players[0].minions))
+        self.assertEqual(MINION_TYPE.PIRATE, game.players[0].minions[0].card.minion_type)
+
+        game.play_single_turn()
+        game.play_single_turn()
+
+        self.assertEqual(2, len(game.players[0].minions))
+        self.assertEqual(MINION_TYPE.PIRATE, game.players[0].minions[0].card.minion_type)
+        self.assertEqual(MINION_TYPE.PIRATE, game.players[0].minions[1].card.minion_type)
+        self.assertFalse(game.players[0].minions[0].stealth)
+
+        game.play_single_turn()
+
+        self.assertEqual(2, len(game.players[0].minions))
+        self.assertEqual(MINION_TYPE.PIRATE, game.players[0].minions[0].card.minion_type)
+        self.assertEqual(MINION_TYPE.PIRATE, game.players[0].minions[1].card.minion_type)
+        self.assertFalse(game.players[0].minions[0].stealth)
+        self.assertEqual(1, len(game.players[1].minions))
+        self.assertEqual(MINION_TYPE.PIRATE, game.players[1].minions[0].card.minion_type)
+
+        game.play_single_turn()
+        self.assertEqual(3, len(game.players[0].minions))
+        self.assertEqual(MINION_TYPE.PIRATE, game.players[0].minions[0].card.minion_type)
+        self.assertEqual(MINION_TYPE.PIRATE, game.players[0].minions[1].card.minion_type)
+        self.assertEqual(MINION_TYPE.PIRATE, game.players[0].minions[2].card.minion_type)
+        self.assertTrue(game.players[0].minions[1].stealth)
+
+    def test_IronSensei(self):
+        game = generate_game_for(IronSensei, Mechwarper, OneCardPlayingAgent, OneCardPlayingAgent)
+
+        for turn in range(4):
+            game.play_single_turn()
+
+        self.assertEqual(1, len(game.current_player.minions))
+        self.assertEqual(0, len(game.other_player.minions))
+
+        game.play_single_turn()
+
+        self.assertEqual(1, len(game.current_player.minions))
+        self.assertEqual(2, game.current_player.minions[0].health)
+        self.assertEqual(1, len(game.other_player.minions))
+        self.assertEqual(3, game.other_player.minions[0].health)
+
+        game.play_single_turn()
+        self.assertEqual(2, len(game.current_player.minions))
+        self.assertEqual(3, game.current_player.minions[0].health)
+        self.assertEqual(3, game.current_player.minions[1].health)
+        self.assertEqual(1, len(game.other_player.minions))
+        self.assertEqual(2, game.other_player.minions[0].health)
+
+        game.play_single_turn()
+        self.assertEqual(2, len(game.current_player.minions))
+        self.assertEqual(4, game.current_player.minions[0].health)
+        self.assertEqual(4, game.current_player.minions[0].calculate_attack())
+        self.assertEqual(4, game.current_player.minions[1].health)
+        self.assertEqual(4, game.current_player.minions[1].calculate_attack())
+        self.assertEqual(2, len(game.other_player.minions))
+        self.assertEqual(3, game.other_player.minions[0].health)
+        self.assertEqual(3, game.other_player.minions[1].health)
+
+    def test_TinkersSharpswordOil(self):
+        game = generate_game_for([LightsJustice, ChillwindYeti, SinisterStrike, TinkersSharpswordOil, Deathwing],
+                                 StonetuskBoar, CardTestingAgent, DoNothingAgent)
+
+        for turn in range(0, 8):
+            game.play_single_turn()
+
+        # Yeti
+        self.assertEqual(1, len(game.players[0].minions))
+        self.assertEqual(4, game.players[0].minions[0].calculate_attack())
+        self.assertIsNotNone(game.players[0].hero.weapon)
+        self.assertEqual(1, game.players[0].hero.weapon.base_attack)
+
+        game.play_single_turn()
+
+        # Hero ability, preparation and tinker's with combo
+        self.assertEqual(1, len(game.players[0].minions))
+        self.assertEqual(7, game.players[0].minions[0].calculate_attack())
+        self.assertEqual(4, game.players[0].hero.weapon.base_attack)
+
+    def test_Sabotage(self):
+        game = generate_game_for([Preparation, Sabotage], [SI7Agent, Wisp], CardTestingAgent,
+                                 HeroPowerAndCardPlayingAgent)
+
+        for turn in range(0, 10):
+            game.play_single_turn()
+        self.assertEqual(2, len(game.players[1].minions))
+        self.assertEqual(1, game.players[1].hero.weapon.base_attack)
+
+        # Sabotage, Preparation and Sabotage will be played, creating a combo.
+        game.play_single_turn()
+        self.assertEqual(0, len(game.players[1].minions))
+        self.assertEqual(None, game.players[1].hero.weapon)
+
+    def test_TradePrinceGallywix(self):
+        game = generate_game_for([Wisp, Wisp, Wisp, TradePrinceGallywix, SinisterStrike], ArcaneExplosion,
+                                 OneCardPlayingAgent, CardTestingAgent)
+
+        for turn in range(11):
+            game.play_single_turn()
+
+        game.other_player.max_mana += 2
+        game.play_single_turn()
+
+        # The opponent played Arcane Explosion Twice, so we should have two copies of it (and none of Gallywix's coin)
+        self.assertEqual("Arcane Explosion", game.other_player.hand[-1].name)
+        self.assertEqual("Arcane Explosion", game.other_player.hand[-2].name)
+        self.assertEqual("Arcane Explosion", game.other_player.hand[-3].name)
+        self.assertEqual("Arcane Explosion", game.other_player.hand[-4].name)
+        self.assertEqual("Trade Prince Gallywix", game.other_player.hand[-5].name)
+
+        self.assertEqual(0, len(game.current_player.hand))
+
+        game.play_single_turn()
+
+        # The other player should not recieve anything for my spell_cast
+        self.assertEqual(0, len(game.other_player.hand))
+
+    def test_TradePrince_Gallywix_and_coin(self):
+        game = generate_game_for(TradePrinceGallywix, Blizzard, OneCardPlayingAgent, OneCardPlayingAgent)
+
+        for turn in range(12):
+            game.play_single_turn()
+
+        self.assertEqual("Gallywix's Coin", game.current_player.hand[-1].name)
+
+    def test_GoblinAutoBarber(self):
+        game = generate_game_for([GoblinAutoBarber, LightsJustice], Wisp, CardTestingAgent, DoNothingAgent)
+
+        for turn in range(4):
+            game.play_single_turn()
+
+        self.assertEqual(1, len(game.players[0].minions))
+        self.assertIsNone(game.players[0].hero.weapon)
+
+        game.play_single_turn()
+
+        self.assertEqual(2, game.players[0].hero.weapon.base_attack)
+        self.assertEqual(2, len(game.players[0].minions))

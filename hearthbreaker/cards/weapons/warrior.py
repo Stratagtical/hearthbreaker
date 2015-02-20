@@ -1,9 +1,13 @@
-import copy
+from hearthbreaker.cards.base import WeaponCard
 from hearthbreaker.constants import CHARACTER_CLASS, CARD_RARITY
-from hearthbreaker.tags.action import Damage
-from hearthbreaker.tags.base import Deathrattle
-from hearthbreaker.tags.selector import MinionSelector, BothPlayer
-from hearthbreaker.game_objects import WeaponCard, Weapon, Minion
+from hearthbreaker.game_objects import Weapon
+from hearthbreaker.tags.action import Damage, IncreaseDurability, ChangeTarget
+from hearthbreaker.tags.base import Deathrattle, Effect
+from hearthbreaker.tags.condition import NotCurrentTarget, OneIn, OpponentMinionCountIsGreaterThan, And, \
+    IsHero, TargetIsMinion
+from hearthbreaker.tags.event import CharacterAttack
+from hearthbreaker.tags.selector import MinionSelector, BothPlayer, HeroSelector, CharacterSelector, EnemyPlayer, \
+    RandomPicker
 
 
 class FieryWarAxe(WeaponCard):
@@ -11,8 +15,7 @@ class FieryWarAxe(WeaponCard):
         super().__init__("Fiery War Axe", 2, CHARACTER_CLASS.WARRIOR, CARD_RARITY.FREE)
 
     def create_weapon(self, player):
-        weapon = Weapon(3, 2)
-        return weapon
+        return Weapon(3, 2)
 
 
 class ArcaniteReaper(WeaponCard):
@@ -20,8 +23,7 @@ class ArcaniteReaper(WeaponCard):
         super().__init__("Arcanite Reaper", 5, CHARACTER_CLASS.WARRIOR, CARD_RARITY.COMMON)
 
     def create_weapon(self, player):
-        weapon = Weapon(5, 2)
-        return weapon
+        return Weapon(5, 2)
 
 
 class Gorehowl(WeaponCard):
@@ -29,12 +31,8 @@ class Gorehowl(WeaponCard):
         super().__init__("Gorehowl", 7, CHARACTER_CLASS.WARRIOR, CARD_RARITY.EPIC)
 
     def create_weapon(self, player):
-        def maybe_increase_durability(target):
-            if isinstance(target, Minion):
-                weapon.durability += 1
-        weapon = Weapon(7, 1)
-        player.hero.bind("attack", maybe_increase_durability)
-        return weapon
+        return Weapon(7, 1, effects=[Effect(CharacterAttack(And(IsHero(), TargetIsMinion())),
+                                            IncreaseDurability(), HeroSelector())])
 
 
 class DeathsBite(WeaponCard):
@@ -42,10 +40,15 @@ class DeathsBite(WeaponCard):
         super().__init__("Death's Bite", 4, CHARACTER_CLASS.WARRIOR, CARD_RARITY.COMMON)
 
     def create_weapon(self, player):
-        def deal_one_to_all(weapon):
-            targets = copy.copy(weapon.player.minions)
-            targets.extend(weapon.player.opponent.minions)
-            for minion in targets:
-                minion.damage(1, None)
-
         return Weapon(4, 2, deathrattle=Deathrattle(Damage(1), MinionSelector(players=BothPlayer())))
+
+
+class OgreWarmaul(WeaponCard):
+    def __init__(self):
+        super().__init__("Ogre Warmaul", 3, CHARACTER_CLASS.WARRIOR, CARD_RARITY.COMMON)
+
+    def create_weapon(self, player):
+        return Weapon(4, 2, effects=[Effect(CharacterAttack(IsHero()),
+                                            ChangeTarget(CharacterSelector(NotCurrentTarget(), EnemyPlayer(),
+                                                                           RandomPicker())),
+                                            HeroSelector(), And(OneIn(2), OpponentMinionCountIsGreaterThan(0)))])

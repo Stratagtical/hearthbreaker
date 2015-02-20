@@ -1,9 +1,9 @@
 import random
 import unittest
 
-from hearthbreaker.agents.basic_agents import DoNothingAgent
+from hearthbreaker.agents.basic_agents import DoNothingAgent, PredictableAgent
 from tests.agents.testing_agents import OneCardPlayingAgent, PlayAndAttackAgent, CardTestingAgent,\
-    SelfSpellTestingAgent
+    SelfSpellTestingAgent, EnemyMinionSpellTestingAgent
 from tests.testing_utils import generate_game_for
 from hearthbreaker.cards import *
 
@@ -63,6 +63,20 @@ class TestWarrior(unittest.TestCase):
         self.assertEqual(1, len(game.players[1].minions))
         self.assertEqual(2, game.players[1].minions[0].calculate_attack())
         self.assertEqual(3, game.players[1].minions[0].health)
+
+        game.play_single_turn()
+        game.play_single_turn()
+
+        self.assertEqual(2, len(game.players[0].minions))
+        self.assertEqual(2, len(game.players[1].minions))
+        self.assertEqual(2, game.players[0].minions[0].calculate_attack())
+        self.assertEqual(2, game.players[0].minions[0].health)
+        self.assertEqual(2, game.players[0].minions[1].calculate_attack())
+        self.assertEqual(2, game.players[0].minions[1].health)
+        self.assertEqual(2, game.players[1].minions[0].calculate_attack())
+        self.assertEqual(3, game.players[1].minions[0].health)
+        self.assertEqual(2, game.players[1].minions[1].calculate_attack())
+        self.assertEqual(3, game.players[1].minions[1].health)
 
     def test_FrothingBerserker(self):
         game = generate_game_for(FrothingBerserker, AngryChicken, OneCardPlayingAgent, PlayAndAttackAgent)
@@ -132,14 +146,14 @@ class TestWarrior(unittest.TestCase):
         # Play the Warsong Commander
         commander = WarsongCommander()
         commander.use(game.players[0], game)
-        self.assertFalse(game.players[0].minions[0].charge)  # Should not give charge to itself
+        self.assertFalse(game.players[0].minions[0].charge())  # Should not give charge to itself
 
         # Test so that enrage doesn't remove the charge
         worgen = RagingWorgen()
         worgen.use(game.players[0], game)
         game.players[0].minions[0].damage(1, None)  # Trigger enrage, charge should still be active
         self.assertEqual(4, game.players[0].minions[0].calculate_attack())
-        self.assertTrue(game.players[0].minions[0].charge)
+        self.assertTrue(game.players[0].minions[0].charge())
 
         # Test so that charge gets applied before a battlecry
         weapon = FieryWarAxe().create_weapon(game.players[0])
@@ -149,7 +163,7 @@ class TestWarrior(unittest.TestCase):
         bloodsail = BloodsailRaider()
         bloodsail.use(game.players[0], game)  # Should gain charge first, then 4 attack from weapon
         self.assertEqual(5, game.players[0].minions[0].calculate_attack())
-        self.assertTrue(game.players[0].minions[0].charge)
+        self.assertTrue(game.players[0].minions[0].charge())
 
         # TODO: Test with Faceless Manipulator here
 
@@ -157,15 +171,15 @@ class TestWarrior(unittest.TestCase):
         game.players[0].minions[-1].die(None)
         game.check_delayed()
         # The previous charged minions should still have charge
-        self.assertTrue(game.players[0].minions[0].charge)
-        self.assertTrue(game.players[0].minions[-1].charge)
+        self.assertTrue(game.players[0].minions[0].charge())
+        self.assertTrue(game.players[0].minions[-1].charge())
 
         # Test so that a minion played before Warsong doesn't get charge
         shield = Shieldbearer()
         shield.summon(game.players[0], game, 0)
-        self.assertFalse(game.players[0].minions[0].charge)
+        self.assertFalse(game.players[0].minions[0].charge())
         commander.use(game.players[0], game)
-        self.assertFalse(game.players[0].minions[1].charge)
+        self.assertFalse(game.players[0].minions[1].charge())
         # Remove the Warsong again
         game.players[0].minions[0].die(None)
         game.players[0].minions[0].activate_delayed()
@@ -173,7 +187,7 @@ class TestWarrior(unittest.TestCase):
         game.players[0].minions[0].change_attack(5)
         # Play Warsong, the buffed minion should not get charge
         commander.use(game.players[0], game)
-        self.assertFalse(game.players[0].minions[1].charge)
+        self.assertFalse(game.players[0].minions[1].charge())
 
         # Auras!
         stormwind = StormwindChampion()
@@ -185,7 +199,7 @@ class TestWarrior(unittest.TestCase):
         game.players[0].minions[-1].activate_delayed()
         # And play it again. It should get the aura FIRST, making it a 4/4 minion, and thus DOES NOT gain charge!
         worgen.use(game.players[0], game)
-        self.assertFalse(game.players[0].minions[0].charge)
+        self.assertFalse(game.players[0].minions[0].charge())
 
     def test_BattleRage(self):
         game = generate_game_for(BattleRage, StonetuskBoar, CardTestingAgent, DoNothingAgent)
@@ -245,7 +259,7 @@ class TestWarrior(unittest.TestCase):
         # Shieldbearer and Charge should be played
         game.play_single_turn()
         self.assertEqual(2, game.players[0].minions[0].calculate_attack())
-        self.assertTrue(game.players[0].minions[0].charge)
+        self.assertTrue(game.players[0].minions[0].charge())
 
     def test_Cleave(self):
         game = generate_game_for(Cleave, SenjinShieldmasta, OneCardPlayingAgent, OneCardPlayingAgent)
@@ -430,3 +444,180 @@ class TestWarrior(unittest.TestCase):
         self.assertEqual(2, len(game.current_player.minions))
         self.assertEqual(2, game.current_player.minions[0].health)
         self.assertEqual(3, game.current_player.minions[1].health)
+
+    def test_Warbot(self):
+        game = generate_game_for(Warbot, StonetuskBoar, CardTestingAgent, PlayAndAttackAgent)
+
+        game.play_single_turn()
+
+        self.assertEqual(1, len(game.current_player.minions))
+        self.assertEqual(1, game.current_player.minions[0].calculate_attack())
+
+        game.play_single_turn()
+        self.assertEqual(1, len(game.other_player.minions))
+        self.assertEqual(2, game.other_player.minions[0].calculate_attack())
+
+    def test_BouncingBlades(self):
+        game = generate_game_for([GoldshireFootman, EchoingOoze, BouncingBlade], [GoldshireFootman, EchoingOoze],
+                                 CardTestingAgent, CardTestingAgent)
+
+        for turn in range(4):
+            game.play_single_turn()
+
+        self.assertEqual(3, len(game.players[0].minions))
+        self.assertEqual(3, len(game.players[1].minions))
+        self.assertEqual(2, game.players[0].minions[0].health)
+        self.assertEqual(2, game.players[0].minions[1].health)
+        self.assertEqual(2, game.players[0].minions[2].health)
+        self.assertEqual(2, game.players[1].minions[0].health)
+        self.assertEqual(2, game.players[1].minions[1].health)
+        self.assertEqual(2, game.players[1].minions[2].health)
+
+        game.play_single_turn()
+
+        self.assertEqual(2, len(game.players[0].minions))
+        self.assertEqual(3, len(game.players[1].minions))
+
+        self.assertEqual(2, game.players[0].minions[0].health)
+        self.assertEqual(1, game.players[0].minions[1].health)
+        self.assertEqual(2, game.players[1].minions[0].health)
+        self.assertEqual(2, game.players[1].minions[1].health)
+        self.assertEqual(1, game.players[1].minions[2].health)
+
+    def test_OgreWarmaul(self):
+        game = generate_game_for(OgreWarmaul,
+                                 [StonetuskBoar, GoldshireFootman, SilverbackPatriarch],
+                                 PlayAndAttackAgent, OneCardPlayingAgent)
+
+        for turn in range(5):
+            game.play_single_turn()
+
+        self.assertIsNotNone(game.current_player.hero.weapon)
+
+        self.assertEqual(1, len(game.other_player.minions))
+        self.assertEqual("Stonetusk Boar", game.other_player.minions[0].card.name)
+        self.assertEqual(30, game.other_player.hero.health)
+
+        game.play_single_turn()
+        game.play_single_turn()
+
+        self.assertEqual(1, len(game.other_player.minions))
+        self.assertEqual("Silverback Patriarch", game.other_player.minions[0].card.name)
+        self.assertEqual(30, game.other_player.hero.health)
+
+    def test_SiegeEngine(self):
+        game = generate_game_for(SiegeEngine, StonetuskBoar, PredictableAgent, DoNothingAgent)
+
+        # Arathi Weaponsmith should be played
+        for turn in range(0, 13):
+            game.play_single_turn()
+
+        self.assertEqual(12, game.players[0].hero.armor)
+        self.assertEqual(1, len(game.players[0].minions))
+        self.assertEqual(5, game.players[0].minions[-1].calculate_attack())
+        self.assertEqual(5, game.players[0].minions[-1].health)
+        self.assertEqual("Siege Engine", game.players[0].minions[0].card.name)
+
+        # Hero Power will be used, triggering the Siege Engine
+        for turn in range(0, 2):
+            game.play_single_turn()
+        self.assertEqual(14, game.players[0].hero.armor)
+        self.assertEqual(2, len(game.players[0].minions))
+        self.assertEqual(6, game.players[0].minions[-1].calculate_attack())
+        self.assertEqual(5, game.players[0].minions[-1].health)
+
+    def test_Crush(self):
+        game = generate_game_for([Crush, ChillwindYeti], DreadInfernal, EnemyMinionSpellTestingAgent,
+                                 CardTestingAgent)
+
+        # Player 2 plays a Dread Infernal
+        for turn in range(0, 12):
+            game.play_single_turn()
+
+        self.assertEqual(1, len(game.players[1].minions))
+
+        # Player 1 pays 7 mana to use Crush
+        game.play_single_turn()
+
+        self.assertEqual(0, len(game.players[0].minions))
+        self.assertEqual(0, len(game.players[1].minions))
+        self.assertEqual(0, game.players[0].mana)
+
+        # Player 2 plays another Dread Infernal
+        game.play_single_turn()
+
+        self.assertEqual(0, len(game.players[0].minions))
+        self.assertEqual(1, len(game.players[1].minions))
+
+        # Player 1 plays Yeti, can't afford Crush
+        game.play_single_turn()
+
+        self.assertEqual(1, len(game.players[0].minions))
+        self.assertEqual(1, len(game.players[1].minions))
+
+        # Player 2 plays another Dread Infernal, damaging the Yeti
+        game.play_single_turn()
+
+        self.assertEqual(1, len(game.players[0].minions))
+        self.assertEqual(2, len(game.players[1].minions))
+        self.assertEqual(4, game.players[0].minions[-1].health)
+
+        # Player 1 pays 3 mana to use Crush and 4 the play a 2nd Yeti
+        game.play_single_turn()
+
+        self.assertEqual(2, len(game.players[0].minions))
+        self.assertEqual(1, len(game.players[1].minions))
+        self.assertEqual(2, game.players[0].mana)
+
+    def test_BurrowingMine(self):
+        game = generate_game_for(BurrowingMine, StonetuskBoar, DoNothingAgent, DoNothingAgent)
+
+        game.play_single_turn()
+        self.assertEqual(0, game.current_player.hero.health)
+        self.assertEqual(3, len(game.current_player.hand))
+        self.assertEqual(0, game.current_player.deck.left)
+
+    def test_IronJuggernaut(self):
+        game = generate_game_for(IronJuggernaut, StonetuskBoar, OneCardPlayingAgent, DoNothingAgent)
+        for turn in range(11):
+            game.play_single_turn()
+
+        self.assertEqual(1, len(game.current_player.minions))
+        self.assertEqual("Iron Juggernaut", game.current_player.minions[0].card.name)
+
+        found_mine = False
+        for card in game.other_player.deck.cards:
+            if card.name == "Burrowing Mine":
+                found_mine = True
+
+        self.assertTrue(found_mine, "Did not find the burrowing mine in the opponent's deck")
+
+    def test_ScrewjankClunker(self):
+        game = generate_game_for([Wisp, ScrewjankClunker, ScrewjankClunker], [Wisp, MoltenGiant],
+                                 OneCardPlayingAgent, OneCardPlayingAgent)
+        for turn in range(8):
+            game.play_single_turn()
+
+        # Clunker cannot buff anything
+        self.assertEqual(2, len(game.players[0].minions))
+        self.assertEqual(1, len(game.players[1].minions))
+        self.assertEqual(2, game.players[0].minions[0].calculate_attack())
+        self.assertEqual(5, game.players[0].minions[0].health)
+        self.assertEqual(1, game.players[0].minions[1].calculate_attack())
+        self.assertEqual(1, game.players[0].minions[1].health)
+        self.assertEqual(1, game.players[1].minions[0].calculate_attack())
+        self.assertEqual(1, game.players[1].minions[0].health)
+
+        game.play_single_turn()
+
+        # Clunker buffs previous Clunker
+        self.assertEqual(3, len(game.players[0].minions))
+        self.assertEqual(1, len(game.players[1].minions))
+        self.assertEqual(2, game.players[0].minions[0].calculate_attack())
+        self.assertEqual(5, game.players[0].minions[0].health)
+        self.assertEqual(4, game.players[0].minions[1].calculate_attack())
+        self.assertEqual(7, game.players[0].minions[1].health)
+        self.assertEqual(1, game.players[0].minions[2].calculate_attack())
+        self.assertEqual(1, game.players[0].minions[2].health)
+        self.assertEqual(1, game.players[1].minions[0].calculate_attack())
+        self.assertEqual(1, game.players[1].minions[0].health)

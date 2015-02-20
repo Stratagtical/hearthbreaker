@@ -1,7 +1,7 @@
 import abc
+import copy
 import json
 import string
-import hearthbreaker.constants
 
 
 class JSONObject(metaclass=abc.ABCMeta):
@@ -15,6 +15,10 @@ class JSONObject(metaclass=abc.ABCMeta):
     def from_json(action, selector):
         pass
 
+    def __from_json__(self, **kwargs):
+        self.__init__(**kwargs)
+        return self
+
     def eq(self, other):
         return str(self) == str(other)
 
@@ -22,27 +26,40 @@ class JSONObject(metaclass=abc.ABCMeta):
         return json.dumps(self.__to_json__(), default=lambda o: o.__to_json__(), sort_keys=True)
 
 
-class Aura(JSONObject):
+class Tag(JSONObject):
+    def __deepcopy__(self, memo):
+        cls = self.__class__
+        new = cls.__new__(cls)
+        memo[id(self)] = new
+        for attribute, value in self.__dict__.items():
+            if attribute != "owner":
+                setattr(new, attribute, copy.deepcopy(value, memo))
+            else:
+                setattr(new, attribute, None)
+        return new
+
+
+class Aura(Tag):
     def __init__(self, status, selector):
-        self.target = None
+        self.owner = None
         self.status = status
         self.selector = selector
 
-    def set_target(self, target):
-        self.target = target
+    def set_owner(self, owner):
+        self.owner = owner
 
     def apply(self):
-        targets = self.selector.get_targets(self.target)
+        targets = self.selector.get_targets(self.owner)
         for target in targets:
-            self.status.act(self.target, target)
+            self.status.act(self.owner, target)
 
     def unapply(self):
-        targets = self.selector.get_targets(self.target)
+        targets = self.selector.get_targets(self.owner)
         for target in targets:
-            self.status.unact(self.target, target)
+            self.status.unact(self.owner, target)
 
     def match(self, obj):
-        return self.selector.match(self.target, obj)
+        return self.selector.match(self.owner, obj)
 
     def __to_json__(self):
         return {
@@ -57,29 +74,41 @@ class Aura(JSONObject):
         return Aura(status, selector)
 
 
-class Buff(JSONObject):
-    def __init__(self, status):
+class Buff(Tag):
+    def __init__(self, status, condition=None):
         self.status = status
+        self.condition = condition
         self.owner = None
 
     def set_owner(self, owner):
         self.owner = owner
 
     def apply(self):
-        self.status.act(self.owner, self.owner)
+        if not self.condition or self.condition.evaluate(self.owner, self.owner):
+            self.status.act(self.owner, self.owner)
 
     def unapply(self):
         self.status.unact(self.owner, self.owner)
 
+    def is_minion(self):
+        return False
+
     def __to_json__(self):
+        if self.condition:
+            return {
+                'status': self.status,
+                'condition': self.condition
+            }
         return {
             'status': self.status,
         }
 
     @staticmethod
-    def from_json(status):
+    def from_json(status, condition=None):
         status = Status.from_json(**status)
-        return Buff(status)
+        if condition:
+            condition = Condition.from_json(**condition)
+        return Buff(status, condition)
 
 
 class BuffUntil(Buff):
@@ -118,17 +147,14 @@ class AuraUntil(Aura):
 
     def apply(self):
         super().apply()
-        self.until.bind(self.target, self.__until__)
+        self.until.bind(self.owner, self.__until__)
 
     def unapply(self):
-        self.until.unbind(self.target, self.__until__)
+        self.until.unbind(self.owner, self.__until__)
         super().unapply()
 
     def __until__(self, *args):
-        if isinstance(self.selector, hearthbreaker.tags.selector.SelfSelector):
-            self.target.remove_aura(self)
-        else:
-            self.target.player.remove_aura(self)
+        self.owner.player.remove_aura(self)
 
     def __to_json__(self):
         return {
@@ -190,13 +216,16 @@ class Picker(JSONObject, metaclass=abc.ABCMeta):
         elif name == "random":
             return RandomPicker(count)
         else:
-            raise TypeError("WHat are you even doing?")
+            raise TypeError("What are you even doing?")
 
 
 class Selector(JSONObject, metaclass=abc.ABCMeta):
     @abc.abstractmethod
     def get_targets(self, source, target=None):
         pass
+
+    def choose_targets(self, source, target=None):
+        return self.get_targets(source, target)
 
     @abc.abstractmethod
     def match(self, source, obj):
@@ -210,10 +239,6 @@ class Selector(JSONObject, metaclass=abc.ABCMeta):
         cls = getattr(selector_mod, cls_name)
         obj = cls.__new__(cls)
         return obj.__from_json__(**kwargs)
-
-    def __from_json__(self, **kwargs):
-        self.__init__(**kwargs)
-        return self
 
 
 class Action(JSONObject, metaclass=abc.ABCMeta):
@@ -230,10 +255,6 @@ class Action(JSONObject, metaclass=abc.ABCMeta):
         cls = getattr(action_mod, cls_name)
         obj = cls.__new__(cls)
         return obj.__from_json__(**kwargs)
-
-    def __from_json__(self, **kwargs):
-        self.__init__(**kwargs)
-        return self
 
 
 class Status(JSONObject, metaclass=abc.ABCMeta):
@@ -254,18 +275,15 @@ class Status(JSONObject, metaclass=abc.ABCMeta):
         obj = cls.__new__(cls)
         return obj.__from_json__(**kwargs)
 
-    def __from_json__(self, **kwargs):
-        self.__init__(**kwargs)
-        return self
-
 
 class Amount(abc.ABCMeta):
     def __init__(cls, name, bases, dct):
         super(Amount, cls).__init__(name, bases, dct)
         base_init = cls.__init__
         base_to_json = cls.__to_json__
+        base_from_json = cls.__from_json__
 
-        def init_with_amount(self, amount=None, multiplier=1, **kwargs):
+        def init_with_amount(self, amount=1, multiplier=1, **kwargs):
             self.amount = amount
             self.multipler = multiplier
             return base_init(self, **kwargs)
@@ -278,18 +296,21 @@ class Amount(abc.ABCMeta):
                 js['multiplier'] = self.multipler
             return js
 
-        def from_json_with_amount(self, amount=None, **kwargs):
+        def from_json_with_amount(self, amount=1, multiplier=1, **kwargs):
             if amount:
                 if isinstance(amount, dict):
-                    kwargs['amount'] = Selector.from_json(**amount)
+                    self.amount = Function.from_json(**amount)
                 else:
-                    kwargs['amount'] = amount
-            cls.__init__(self, **kwargs)
-            return self
+                    self.amount = amount
+            self.multipler = multiplier
+            if base_from_json is JSONObject.__from_json__:
+                base_init(self, **kwargs)
+                return self
+            return base_from_json(self, **kwargs)
 
-        def get_amount(self, source, target):
-            if isinstance(self.amount, Selector):
-                return len(self.amount.get_targets(source, target)) * self.multipler
+        def get_amount(self, source, target, *args):
+            if isinstance(self.amount, Function):
+                return self.amount.do(source) * self.multipler
             else:
                 return self.amount
 
@@ -326,6 +347,17 @@ class Event(JSONObject, metaclass=abc.ABCMeta):
         cls = getattr(event_mod, cls_name)
         obj = cls.__new__(cls)
         return obj.__from_json__(**kwargs)
+
+    def __deepcopy__(self, memo):
+        cls = type(self)
+        new = cls.__new__(cls)
+        memo[id(self)] = new
+        if self.condition:
+            new.condition = copy.deepcopy(self.condition, memo)
+        else:
+            new.condition = None
+        new.event_name = self.event_name
+        return new
 
     def __from_json__(self, condition=None):
         if condition:
@@ -383,6 +415,11 @@ class PlayerEvent(Event):
             else:
                 player.unbind(self.event_name, func)
 
+    def __deepcopy__(self, memo):
+        new = super().__deepcopy__(memo)
+        new.player = copy.deepcopy(self.player, memo)
+        return new
+
     def __to_json__(self):
         super_json = super().__to_json__()
         super_json.update({
@@ -398,8 +435,8 @@ class PlayerEvent(Event):
         return self
 
 
-class Effect(JSONObject):
-    def __init__(self, event, action, selector):
+class Effect(Tag):
+    def __init__(self, event, action, selector, condition=None):
         self.event = event
         if isinstance(action, Status):
             from hearthbreaker.tags.action import Give
@@ -407,23 +444,32 @@ class Effect(JSONObject):
         else:
             self.action = action
         self.selector = selector
-        self.target = None
+        self.owner = None
+        self.condition = condition
 
     def apply(self):
-        self.event.bind(self.target, self._find_target)
+        self.event.bind(self.owner, self._find_target)
 
     def unapply(self):
-        self.event.unbind(self.target, self._find_target)
+        self.event.unbind(self.owner, self._find_target)
 
-    def set_target(self, target):
-        self.target = target
+    def set_owner(self, owner):
+        self.owner = owner
 
     def _find_target(self, focus=None, other=None, *args):
-        targets = self.selector.get_targets(self.target, focus)
-        for target in targets:
-            self.action.act(self.target, target)
+        if not self.condition or self.condition.evaluate(self.owner, focus, other, *args):
+            targets = self.selector.choose_targets(self.owner, focus)
+            for target in targets:
+                self.action.act(self.owner, target)
 
     def __to_json__(self):
+        if self.condition:
+            return {
+                'event': self.event,
+                'action': self.action,
+                'selector': self.selector,
+                'condition': self.condition,
+            }
         return {
             'event': self.event,
             'action': self.action,
@@ -431,11 +477,13 @@ class Effect(JSONObject):
         }
 
     @staticmethod
-    def from_json(game, action, event, selector):
+    def from_json(action, event, selector, condition=None):
             action = Action.from_json(**action)
             event = Event.from_json(**event)
             selector = Selector.from_json(**selector)
-            return Effect(event, action, selector)
+            if condition:
+                condition = Condition.from_json(**condition)
+            return Effect(event, action, selector, condition)
 
 
 class Condition(JSONObject, metaclass=abc.ABCMeta):
@@ -452,50 +500,63 @@ class Condition(JSONObject, metaclass=abc.ABCMeta):
         obj = cls.__new__(cls)
         return obj.__from_json__(**kwargs)
 
-    def __from_json__(self, **kwargs):
-        self.__init__(**kwargs)
-        return self
-
     @abc.abstractmethod
     def __to_json__(self):
         pass
 
 
-class Deathrattle(JSONObject):
-    def __init__(self, action, selector, condition=None):
-        self.action = action
+class ActionTag(Tag):
+    def __init__(self, actions, selector, condition=None):
+        if isinstance(actions, list):
+            self.actions = actions
+        else:
+            self.actions = [actions]
         self.selector = selector
         self.condition = condition
 
-    def deathrattle(self, target):
+    def do(self, target):
         if self.condition:
             if not self.condition.evaluate(target):
                 return
-        targets = self.selector.get_targets(target, target)
+        targets = self.selector.choose_targets(target, target)
+        found_target = False
         for t in targets:
-            self.action.act(target, t)
+            found_target = True
+            for action in self.actions:
+                action.act(target, t)
 
-        target.player.game.check_delayed()
+        return found_target
 
     def __to_json__(self):
         if self.condition:
             return {
-                'action': self.action,
+                'actions': self.actions,
                 'selector': self.selector,
                 'condition': self.condition,
             }
         return {
-            'action': self.action,
+            'actions': self.actions,
             'selector': self.selector
         }
 
-    @staticmethod
-    def from_json(action, selector, condition=None):
-        action = Action.from_json(**action)
+    @classmethod
+    def from_json(cls, actions, selector, condition=None):
+        action = [Action.from_json(**a) for a in actions]
         selector = Selector.from_json(**selector)
         if condition:
             condition = Condition.from_json(**condition)
-        return Deathrattle(action, selector, condition)
+        return cls(action, selector, condition)
+
+
+class Deathrattle(ActionTag):
+    def do(self, target):
+        super().do(target)
+        target.player.game.check_delayed()
+
+
+class Spell(ActionTag):
+    def __init__(self, actions, selector, condition=None):
+        super().__init__(actions, selector, condition)
 
 
 class CARD_SOURCE:
@@ -505,7 +566,9 @@ class CARD_SOURCE:
     OPPONENT_HAND = 3
     OPPONENT_DECK = 4
     LIST = 5
-    LAST_SPELL = 6
+    LAST_CARD = 6
+    LAST_DRAWN = 7
+    MINION = 8
     __sources = {
         "COLLECTION": COLLECTION,
         "MY_HAND": MY_HAND,
@@ -513,7 +576,9 @@ class CARD_SOURCE:
         "OPPONENT_HAND": OPPONENT_HAND,
         "OPPONENT_DECK": OPPONENT_DECK,
         "LIST": LIST,
-        "LAST_SPELL": LAST_SPELL,
+        "LAST_CARD": LAST_CARD,
+        "LAST_DRAWN": LAST_DRAWN,
+        "MINION": MINION,
     }
 
     @staticmethod
@@ -527,15 +592,17 @@ class CARD_SOURCE:
 
 
 class CardQuery(JSONObject):
-    def __init__(self, name=None, conditions=[], source=CARD_SOURCE.COLLECTION, source_list=None, make_copy=False):
+    def __init__(self, name=None, conditions=[], source=CARD_SOURCE.COLLECTION, source_list=None, make_copy=False,
+                 minion=None):
         self.name = name
         self.conditions = conditions
         self.source = source
         self.source_list = source_list
         self.make_copy = make_copy
+        self.minion = minion
 
-    def get_card(self, player):
-        from hearthbreaker.game_objects import card_lookup, get_cards
+    def get_card(self, player, owner):
+        from hearthbreaker.engine import card_lookup, get_cards
         if self.name:
             return card_lookup(self.name)
 
@@ -551,8 +618,15 @@ class CardQuery(JSONObject):
             card_list = player.opponent.hand
         elif self.source == CARD_SOURCE.LIST:
             card_list = self.source_list
-        elif self.source == CARD_SOURCE.LAST_SPELL:
-            return type(player.game.last_spell)()
+        elif self.source == CARD_SOURCE.LAST_CARD:
+            return type(player.game.last_card)()
+        elif self.source == CARD_SOURCE.LAST_DRAWN:
+            chosen_card = player.hand[-1]
+            player.hand.remove(chosen_card)
+            chosen_card.unattach()
+            return chosen_card
+        elif self.source == CARD_SOURCE.MINION:
+            card_list = [minion.card for minion in self.minion.get_targets(owner, owner)]
         else:
             card_list = []
         # TODO Throw an exception in any other case?
@@ -584,9 +658,11 @@ class CardQuery(JSONObject):
             return chosen_card
         elif self.source == CARD_SOURCE.MY_HAND:
             player.hand.remove(chosen_card)
+            chosen_card.unattach()
             return chosen_card
         elif self.source == CARD_SOURCE.OPPONENT_HAND:
             player.opponent.hand.remove(chosen_card)
+            chosen_card.unattach()
             return chosen_card
 
     def __to_json__(self):
@@ -602,12 +678,14 @@ class CardQuery(JSONObject):
                 json_obj['source_list'] = [card.name for card in self.source_list]
             if self.make_copy:
                 json_obj['make_copy'] = self.make_copy
+            if self.minion:
+                json_obj['minion'] = self.minion
 
         return json_obj
 
     @staticmethod
-    def from_json(name=None, conditions=[], source="collection", source_list=None, make_copy=False):
-        from hearthbreaker.game_objects import card_lookup
+    def from_json(name=None, conditions=[], source="collection", source_list=None, make_copy=False, minion=None):
+        from hearthbreaker.engine import card_lookup
         query = CardQuery.__new__(CardQuery)
         query.name = name
         query.conditions = []
@@ -621,49 +699,19 @@ class CardQuery(JSONObject):
         else:
             query.source_list = None
         query.make_copy = make_copy
+        if minion:
+            query.minion = Selector.from_json(**minion)
+        else:
+            query.minion = None
         return query
 
 
-class Battlecry(JSONObject):
+class Battlecry(ActionTag):
     def __init__(self, actions, selector, condition=None):
-        if isinstance(actions, Action):
-            self.actions = [actions]
-        else:
-            self.actions = actions
-        self.selector = selector
-        self.condition = condition
-
-    def battlecry(self, target):
-        if self.condition:
-            if not self.condition.evaluate(target):
-                return
-        targets = self.selector.get_targets(target, target)
-        for t in targets:
-            for action in self.actions:
-                action.act(target, t)
-
-    def __to_json__(self):
-        if self.condition:
-            return {
-                'actions': self.actions,
-                'selector': self.selector,
-                'condition': self.condition
-            }
-        return {
-            'actions': self.actions,
-            'selector': self.selector
-        }
-
-    @staticmethod
-    def from_json(actions, selector, condition=None):
-        actions = [Action.from_json(**action) for action in actions]
-        selector = Selector.from_json(**selector)
-        if condition:
-            condition = Condition.from_json(**condition)
-        return Battlecry(actions, selector, condition)
+        super().__init__(actions, selector, condition)
 
 
-class Choice(Battlecry):
+class Choice(ActionTag):
     def __init__(self, card, actions, selector, condition=None):
         self.card = card
         super().__init__(actions, selector, condition)
@@ -675,7 +723,7 @@ class Choice(Battlecry):
 
     @staticmethod
     def from_json(card, actions, selector, condition=None):
-        from hearthbreaker.game_objects import card_lookup
+        from hearthbreaker.engine import card_lookup
         actions = [Action.from_json(**action) for action in actions]
         selector = Selector.from_json(**selector)
         if condition:
@@ -684,34 +732,70 @@ class Choice(Battlecry):
         return Choice(card, actions, selector, condition)
 
 
-class Enrage(JSONObject):
-    def __init__(self, statuses, selector):
-        if isinstance(statuses, Status):
-            self.statuses = [statuses]
-        else:
-            self.statuses = statuses
-        self.selector = selector
+class Function(JSONObject, metaclass=abc.ABCMeta):
 
-    def enrage(self, target):
-        targets = self.selector.get_targets(target, target)
-        for t in targets:
-            for status in self.statuses:
-                status.act(target, t)
-
-    def unenrage(self, target):
-        targets = self.selector.get_targets(target, target)
-        for t in targets:
-            for status in self.statuses:
-                status.unact(target, t)
-
-    def __to_json__(self):
-        return {
-            'statuses': self.statuses,
-            'selector': self.selector
-        }
+    def do(self, target):
+        pass
 
     @staticmethod
-    def from_json(statuses, selector):
-        statuses = [Status.from_json(**status) for status in statuses]
-        selector = Selector.from_json(**selector)
-        return Enrage(statuses, selector)
+    def from_json(name, **kwargs):
+        import hearthbreaker.tags.selector as selector_mod
+
+        cls_name = string.capwords(name, '_').replace("_", "")
+        cls = getattr(selector_mod, cls_name)
+        obj = cls.__new__(cls)
+        return obj.__from_json__(**kwargs)
+
+    def __from_json__(self, **kwargs):
+        self.__init__(**kwargs)
+        return self
+
+
+class Context(metaclass=abc.ABCMeta):
+    """
+    Handles computations for actions and statuses that change based on if they are part of a battlecry, hero power
+    or spell.
+    """
+
+    def __init__(self, player):
+        """
+        Creates a context associated with a particular player
+        :param player: The player that this context is associated with
+        :type player: :class:`hearthbreaker.engine.Player`
+        """
+        self.player = player
+
+    @abc.abstractmethod
+    def filter_targets(self, targets):
+        """
+        Filter the targets that the user can choose.  Spells cannot target minions who are not spell_targetable,
+        for example.
+
+        :param targets: All the possible target characters
+        :type targets: [:class:`hearthbreaker.game_objects.Character`]
+        :return: A list of targets which has been filtered according to the context
+        :rtype: [:class:`hearthbreaker.game_objects.Character`]
+        """
+        pass
+
+    @abc.abstractmethod
+    def damage(self, amount, target):
+        """
+        Damage the target according to the context.  Spells must include spell_damage, while battlecries and physical
+        attacks do not
+        :param amount: The amount to damage the target
+        :type amount: :class:`hearthbreaker.game_objects.Character`
+        :param target: The character getting damaged
+        """
+        pass
+
+    @abc.abstractmethod
+    def heal(self, amount, target):
+        """
+        Heals the target according to the context.  Spells and hero power include heal_multiplier, while battlecries
+        do not
+        :param amount: The amount to damage the target
+        :type amount: :class:`hearthbreaker.game_objects.Character`
+        :param target: The character getting damaged
+        """
+        pass

@@ -1,6 +1,6 @@
 import hearthbreaker
 from hearthbreaker.constants import MINION_TYPE
-from hearthbreaker.tags.base import Condition
+from hearthbreaker.tags.base import Condition, Amount
 
 
 class HasSecret(Condition):
@@ -64,17 +64,33 @@ class HasOverload(Condition):
         }
 
 
-class ManaCost(Condition):
-    def __init__(self, cost):
-        self.cost = cost
+class ManaCost(Condition, metaclass=Amount):
+    def __init__(self):
+        super().__init__()
 
     def evaluate(self, target, obj, *args):
-        return obj.mana == self.cost
+        return obj.mana == self.get_amount(target, target)
 
     def __to_json__(self):
         return {
             'name': 'mana_cost',
-            'cost': self.cost
+        }
+
+    def __from_json__(self, **kwargs):
+        return self
+
+
+class CardRarity(Condition):
+    def __init__(self, rarity):
+        self.rarity = rarity
+
+    def evaluate(self, target, obj, *args):
+        return obj.is_card() and obj.rarity == self.rarity
+
+    def __to_json__(self):
+        return {
+            'name': 'card_rarity',
+            'rarity': self.rarity
         }
 
 
@@ -88,6 +104,16 @@ class IsMinion(Condition):
         }
 
 
+class TargetIsMinion(Condition):
+    def evaluate(self, owner, minion, target, *args):
+        return target.is_minion()
+
+    def __to_json__(self):
+        return {
+            "name": 'target_is_minion'
+        }
+
+
 class IsWeapon(Condition):
     def evaluate(self, target, weapon, *args):
         return weapon.is_weapon()
@@ -95,6 +121,16 @@ class IsWeapon(Condition):
     def __to_json__(self):
         return {
             "name": 'is_weapon'
+        }
+
+
+class NotCurrentTarget(Condition):
+    def evaluate(self, target, minion, *args):
+        return minion is not target.current_target
+
+    def __to_json__(self):
+        return {
+            'name': 'not_current_target'
         }
 
 
@@ -126,6 +162,47 @@ class CardIsNotTarget(Condition):
         return {
             'name': 'card_is_not_target'
         }
+
+
+class Not(Condition):
+    def __init__(self, condition):
+        super().__init__()
+        self.condition = condition
+
+    def evaluate(self, target, *args):
+        return not self.condition.evaluate(target, *args)
+
+    def __to_json__(self):
+        return {
+            'name': 'not',
+            'condition': self.condition,
+        }
+
+    def __from_json__(self, condition):
+        self.condition = Condition.from_json(**condition)
+        return self
+
+
+class And(Condition):
+    def __init__(self, *conditions):
+        super().__init__()
+        self.conditions = conditions
+
+    def evaluate(self, target, *args):
+        for condition in self.conditions:
+            if not condition.evaluate(target, *args):
+                return False
+        return True
+
+    def __to_json__(self):
+        return {
+            'name': 'and',
+            'conditions': self.conditions
+        }
+
+    def __from_json__(self, conditions):
+        self.conditions = [Condition.from_json(**condition) for condition in conditions]
+        return self
 
 
 class IsType(Condition):
@@ -170,6 +247,20 @@ class MinionHasDeathrattle(Condition):
         return len(minion.deathrattle) > 0
 
 
+class HasStatus(Condition):
+    def __init__(self, status):
+        self.status = status
+
+    def __to_json__(self):
+        return {
+            'name': 'has_status',
+            'status': self.status,
+        }
+
+    def evaluate(self, target, minion, *args):
+        return getattr(minion, self.status)
+
+
 class MinionCountIs(Condition):
     def __init__(self, count):
         self.count = count
@@ -195,6 +286,20 @@ class OpponentMinionCountIsGreaterThan(Condition):
         return {
             'name': 'opponent_minion_count_is_greater_than',
             'count': self.count,
+        }
+
+
+class GreaterThan(Condition, metaclass=Amount):
+    def __init__(self, value):
+        self.value = value
+
+    def evaluate(self, target, *args):
+        return self.get_amount(target, target, *args) > self.value
+
+    def __to_json__(self):
+        return {
+            'name': 'greater_than',
+            'value': self.value,
         }
 
 
@@ -246,6 +351,23 @@ class AttackGreaterThan(Condition):
         }
 
 
+class BaseAttackEqualTo(Condition):
+    def __init__(self, attack_equal, include_self=False):
+        super().__init__()
+        self.attack_equal = attack_equal
+        self.include_self = include_self
+
+    def evaluate(self, target, minion, *args):
+        return (self.include_self or target is not minion) and minion.base_attack == self.attack_equal
+
+    def __to_json__(self):
+        return {
+            'name': 'base_attack_equal_to',
+            'include_self': self.include_self,
+            'attack_equal': self.attack_equal
+        }
+
+
 class IsDamaged(Condition):
     def evaluate(self, target, minion, *args):
         return minion.health != minion.calculate_max_health()
@@ -270,4 +392,64 @@ class InGraveyard(Condition):
         return {
             'name': 'in_graveyard',
             'card': self.card
+        }
+
+
+class OneIn(Condition):
+    def __init__(self, amount):
+        self.amount = amount
+
+    def evaluate(self, target, *args):
+        return 0 == target.game.random_amount(0, self.amount - 1)
+
+    def __to_json__(self):
+        return {
+            'name': 'one_in',
+            'amount': self.amount,
+        }
+
+
+class HasDivineShield(Condition):
+    def evaluate(self, target, minion, *args):
+        return minion.divine_shield
+
+    def __to_json__(self):
+        return {
+            'name': 'has_divine_shield',
+        }
+
+
+class HasCardName(Condition):
+    def __init__(self, card_name):
+        self.card_name = card_name
+
+    def evaluate(self, target, minion, *args):
+        if minion.is_card():
+            return minion.name == self.card_name
+        return minion.card.name == self.card_name
+
+    def __to_json__(self):
+        return {
+            'name': 'has_card_name',
+            'card_name': self.card_name,
+        }
+
+
+class OwnersTurn(Condition):
+    def evaluate(self, target, minion, *args):
+        return minion.player is minion.player.game.current_player
+
+    def __to_json__(self):
+        return {
+            'name': 'owners_turn'
+        }
+
+
+class IsHero(Condition):
+    def evaluate(self, target, character, *args):
+        return character.is_hero()
+
+    def __to_json__(self):
+        return {
+            'name': 'is_hero'
         }

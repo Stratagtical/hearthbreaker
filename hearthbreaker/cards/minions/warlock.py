@@ -1,13 +1,16 @@
+from hearthbreaker.cards.base import MinionCard
+from hearthbreaker.cards.heroes import Jaraxxus
+from hearthbreaker.cards.weapons.warlock import BloodFury
 from hearthbreaker.constants import CHARACTER_CLASS, CARD_RARITY, MINION_TYPE
-from hearthbreaker.tags.action import Summon, Kill, Damage, Discard, DestroyManaCrystal
-from hearthbreaker.tags.base import Effect, Aura, Deathrattle, CardQuery, CARD_SOURCE, Battlecry
-from hearthbreaker.tags.condition import IsType, MinionCountIs
-from hearthbreaker.tags.event import TurnEnded
+from hearthbreaker.game_objects import Minion
+from hearthbreaker.tags.action import Summon, Kill, Damage, Discard, DestroyManaCrystal, Give, Transform, Equip, \
+    Remove
+from hearthbreaker.tags.base import Effect, Aura, Deathrattle, CardQuery, CARD_SOURCE, Battlecry, Buff
+from hearthbreaker.tags.condition import IsType, MinionCountIs, Not, OwnersTurn, IsHero, And, Adjacent
+from hearthbreaker.tags.event import TurnEnded, CharacterDamaged
 from hearthbreaker.tags.selector import MinionSelector, MinionCardSelector, PlayerSelector, \
-    SelfSelector, BothPlayer, HeroSelector, CharacterSelector, RandomPicker
-from hearthbreaker.game_objects import MinionCard, Minion, WeaponCard, Weapon
-from hearthbreaker.powers import JaraxxusPower
-from hearthbreaker.tags.status import ChangeHealth, ManaChange
+    SelfSelector, BothPlayer, HeroSelector, CharacterSelector, RandomPicker, Attribute
+from hearthbreaker.tags.status import ChangeHealth, ManaChange, ChangeAttack, Immune
 
 
 class FlameImp(MinionCard):
@@ -57,7 +60,7 @@ class Felguard(MinionCard):
 class Doomguard(MinionCard):
     def __init__(self):
         super().__init__("Doomguard", 5, CHARACTER_CLASS.WARLOCK, CARD_RARITY.RARE, MINION_TYPE.DEMON,
-                         battlecry=Battlecry(Discard(2), PlayerSelector()))
+                         battlecry=Battlecry(Discard(amount=2), PlayerSelector()))
 
     def create_minion(self, player):
         return Minion(5, 7, charge=True)
@@ -66,7 +69,7 @@ class Doomguard(MinionCard):
 class Succubus(MinionCard):
     def __init__(self):
         super().__init__("Succubus", 2, CHARACTER_CLASS.WARLOCK, CARD_RARITY.FREE, MINION_TYPE.DEMON,
-                         battlecry=Battlecry(Discard(1), PlayerSelector()))
+                         battlecry=Battlecry(Discard(), PlayerSelector()))
 
     def create_minion(self, player):
         return Minion(4, 3)
@@ -77,7 +80,7 @@ class SummoningPortal(MinionCard):
         super().__init__("Summoning Portal", 4, CHARACTER_CLASS.WARLOCK, CARD_RARITY.COMMON)
 
     def create_minion(self, player):
-        return Minion(0, 4, auras=[Aura(ManaChange(2, 1, MinionCardSelector()), PlayerSelector())])
+        return Minion(0, 4, auras=[Aura(ManaChange(-2, 1, minimum=1), MinionCardSelector())])
 
 
 class BloodImp(MinionCard):
@@ -91,56 +94,34 @@ class BloodImp(MinionCard):
 
 class LordJaraxxus(MinionCard):
     def __init__(self):
-        super().__init__("Lord Jaraxxus", 9, CHARACTER_CLASS.WARLOCK, CARD_RARITY.LEGENDARY, MINION_TYPE.DEMON)
+        super().__init__("Lord Jaraxxus", 9, CHARACTER_CLASS.WARLOCK, CARD_RARITY.LEGENDARY, MINION_TYPE.DEMON,
+                         battlecry=(Battlecry(Transform(Jaraxxus()), HeroSelector()),
+                                    Battlecry(Remove(), SelfSelector()),
+                                    Battlecry(Equip(BloodFury()), PlayerSelector())))
 
     def create_minion(self, player):
-        def summon_jaraxxus(minion):
-            class BloodFury(WeaponCard):
-                def __init__(self):
-                    super().__init__("Blood Fury", 3, CHARACTER_CLASS.LORD_JARAXXUS, CARD_RARITY.SPECIAL)
+        return Minion(3, 15)
 
-                def create_weapon(self, player):
-                    return Weapon(3, 8)
 
-            minion.remove_from_board()
-            player.trigger("minion_played", minion)
-            player.hero.health = minion.health
-            player.hero.base_health = minion.base_health + minion.health_delta
-            player.hero.character_class = CHARACTER_CLASS.LORD_JARAXXUS
-            player.hero.power = JaraxxusPower(player.hero)
-            blood_fury = BloodFury()
-            weapon = blood_fury.create_weapon(player)
-            weapon.card = blood_fury
-            weapon.player = player
-            weapon.game = player.game
-            weapon.equip(player)
+class Infernal(MinionCard):
+    def __init__(self):
+        super().__init__("Infernal", 6, CHARACTER_CLASS.WARLOCK, CARD_RARITY.SPECIAL,
+                         minion_type=MINION_TYPE.DEMON)
 
-        return Minion(3, 15, battlecry=summon_jaraxxus)
+    def create_minion(self, player):
+        return Minion(6, 6)
 
 
 class VoidTerror(MinionCard):
     def __init__(self):
-        super().__init__("Void Terror", 3, CHARACTER_CLASS.WARLOCK, CARD_RARITY.RARE, MINION_TYPE.DEMON)
+        super().__init__("Void Terror", 3, CHARACTER_CLASS.WARLOCK, CARD_RARITY.RARE, MINION_TYPE.DEMON,
+                         battlecry=(Battlecry(
+                             Give([Buff(ChangeHealth(Attribute("health", MinionSelector(Adjacent())))),
+                                   Buff(ChangeAttack(Attribute("attack", MinionSelector(Adjacent()))))]),
+                             SelfSelector()), Battlecry(Kill(), MinionSelector(Adjacent()))))
 
     def create_minion(self, player):
-        def consume_adjacent(m):
-            bonus_attack = 0
-            bonus_health = 0
-            if m.index > 0:
-                minion = m.player.minions[m.index - 1]
-                bonus_attack += minion.calculate_attack()
-                bonus_health += minion.health
-                minion.die(None)
-
-            if m.index < len(m.player.minions) - 1:
-                minion = m.player.minions[m.index + 1]
-                bonus_attack += minion.calculate_attack()
-                bonus_health += minion.health
-                minion.die(None)
-
-            m.change_attack(bonus_attack)
-            m.increase_health(bonus_health)
-        return Minion(3, 3, battlecry=consume_adjacent)
+        return Minion(3, 3)
 
 
 class Voidcaller(MinionCard):
@@ -160,9 +141,47 @@ class AnimaGolem(MinionCard):
         return Minion(9, 9, effects=[Effect(TurnEnded(MinionCountIs(1), BothPlayer()), Kill(), SelfSelector())])
 
 
+class Imp(MinionCard):
+    def __init__(self):
+        super().__init__("Imp", 1, CHARACTER_CLASS.WARLOCK, CARD_RARITY.SPECIAL, MINION_TYPE.DEMON,
+                         ref_name="Imp (Warlock)")
+
+    def create_minion(self, player):
+        return Minion(1, 1)
+
+
 class WorthlessImp(MinionCard):
     def __init__(self):
         super().__init__("Worthless Imp", 1, CHARACTER_CLASS.WARLOCK, CARD_RARITY.SPECIAL, MINION_TYPE.DEMON)
 
     def create_minion(self, p):
         return Minion(1, 1)
+
+
+class FelCannon(MinionCard):
+    def __init__(self):
+        super().__init__("Fel Cannon", 4, CHARACTER_CLASS.WARLOCK, CARD_RARITY.RARE, MINION_TYPE.MECH)
+
+    def create_minion(self, player):
+        return Minion(3, 5, effects=[Effect(TurnEnded(), Damage(2), MinionSelector(Not(IsType(MINION_TYPE.MECH, True)),
+                                                                                   BothPlayer(), RandomPicker()))])
+
+
+class MalGanis(MinionCard):
+    def __init__(self):
+        super().__init__("Mal'Ganis", 9, CHARACTER_CLASS.WARLOCK, CARD_RARITY.LEGENDARY, MINION_TYPE.DEMON)
+
+    def create_minion(self, player):
+        return Minion(9, 7, auras=[Aura(ChangeHealth(2), MinionSelector(IsType(MINION_TYPE.DEMON))),
+                                   Aura(ChangeAttack(2), MinionSelector(IsType(MINION_TYPE.DEMON))),
+                                   Aura(Immune(), HeroSelector())])
+
+
+class FloatingWatcher(MinionCard):
+    def __init__(self):
+        super().__init__("Floating Watcher", 5, CHARACTER_CLASS.WARLOCK, CARD_RARITY.COMMON, MINION_TYPE.DEMON)
+
+    def create_minion(self, player):
+        return Minion(4, 4, effects=[Effect(CharacterDamaged(And(IsHero(), OwnersTurn())),
+                                            Give([Buff(ChangeAttack(2)), Buff(ChangeHealth(2))]),
+                                            SelfSelector())])
